@@ -1,5 +1,5 @@
 const SITE = {
-  name: "School Psych NY",
+  name: "School Psych Ny",
   year: "2026",
 
   tagline: "School Psychologist • Creator",

@@ -74,19 +74,19 @@ body {
 .profile-image {
   width: 120px;
   height: 120px;
-
-  margin: 0 auto 20px;
-
   border-radius: 50%;
+  object-fit: cover;
+  display: block;
+  margin: 0 auto 20px;
+}
 
-  background: #ddd6cc;
-
-  display: flex;
-  align-items: center;
-  justify-content: center;
-
-  color: #777;
-  font-size: 12px;
+.about-image {
+  display: block;
+  width: 250px;
+  height: 250px;
+  object-fit: cover;
+  margin: 32px auto 0;
+  border-radius: 50%;
 }
 
 h1 {
