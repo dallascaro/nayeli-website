@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-    <title>Resources | Her Name</title>
+    <title>Nayeli Moreno | Resources</title>
 
     <link rel="stylesheet" href="../css/styles.css">
 </head>
@@ -15,9 +15,7 @@
     <nav class="navbar">
         <div class="nav-container">
 
-            <a href="../index.html" class="logo">
-                Her Name
-            </a>
+            <a href="../index.html" class="logo" data-site-name></a>
 
             <div class="nav-links">
                 <a href="../index.html">Home</a>
@@ -36,33 +34,42 @@
             <h1>Resources</h1>
 
             <p>
-                Welcome to my resource page!
+                Explore my favorite teaching resources, products,
+                and recommendations.
             </p>
 
-            <div class="resource-card">
-                <h2>Teachers Pay Teachers</h2>
 
-                <p>
-                    Browse my teaching resources and materials.
-                </p>
+            <div class="resource-card" data-resource="tpt">
 
-                <a href="#" class="link-button">
+                <h2 data-resource-title></h2>
+
+                <p data-resource-description></p>
+
+                <a
+                    href="#"
+                    class="link-button"
+                    data-resource-link
+                >
                     Visit TPT
                 </a>
+
             </div>
 
 
-            <div class="resource-card">
-                <h2>Amazon Favorites</h2>
+            <div class="resource-card" data-resource="amazon">
 
-                <p>
-                    Check out some of my favorite products and
-                    recommendations.
-                </p>
+                <h2 data-resource-title></h2>
 
-                <a href="#" class="link-button">
+                <p data-resource-description></p>
+
+                <a
+                    href="#"
+                    class="link-button"
+                    data-resource-link
+                >
                     Shop Amazon
                 </a>
+
             </div>
 
         </section>
@@ -71,8 +78,14 @@
 
 
     <footer>
-        <p>© 2026 Her Name</p>
+        <p>
+            © <span data-site-year></span>
+            <span data-site-name></span>
+        </p>
     </footer>
+
+
+    <script src="../js/main.js"></script>
 
 </body>
 </html>
