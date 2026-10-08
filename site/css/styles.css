@@ -149,6 +149,10 @@ h1 {
   margin-bottom: 25px;
 }
 
+.page-content p[data-site-about-description] {
+  white-space: pre-line;
+}
+
 .resource-card {
   background: white;
 
