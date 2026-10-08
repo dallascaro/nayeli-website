@@ -14,7 +14,7 @@ const SITE = {
   links: {
     amazon:
       "https://www.amazon.com/shop/nymoren?tag=nayelimoreno-20&ref_=cm_sw_r_mwn_aipsfshop_SEBZV16BP07X0M4SXGZY&language=en-US",
-    instagram: "https://www.instagram.com/nymorenoo",
+    instagram: "https://www.instagram.com/schoolpsychny",
     tiktok: "https://www.tiktok.com/@nymoren",
   },
 };
