@@ -3,3 +3,11 @@
 
 # Cloudflare Wrangler
 .wrangler/
+# Node.js dependencies
+node_modules/
+
+# Local environment files
+.dev.vars
+.env
+.env.*
+!.env.example

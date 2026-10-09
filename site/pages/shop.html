@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Browse educational resources created for school psychologists and educators."
+    />
+
+    <title>Shop | School Psych NY</title>
+
+    <link rel="stylesheet" href="../css/styles.css" />
+  </head>
+
+  <body>
+    <nav class="navbar">
+      <div class="nav-container">
+        <a href="../index.html" class="logo" data-site-name></a>
+
+        <div class="nav-links">
+          <a href="../index.html">Home</a>
+          <a href="about.html">About Me</a>
+          <a href="shop.html" aria-current="page">Shop</a>
+        </div>
+      </div>
+    </nav>
+
+    <main class="shop-container">
+      <header class="shop-hero">
+        <p class="shop-eyebrow">THE SCHOOL PSYCH NY SHOP</p>
+        <h1>Resources for your school day 🍎</h1>
+        <p>
+          Practical resources and activities to make your work a little easier.
+        </p>
+        <p class="shop-demo-notice">
+          Store preview — these are sample products, and checkout is not active.
+        </p>
+      </header>
+
+      <section aria-labelledby="products-heading">
+        <div class="shop-section-heading">
+          <div>
+            <h2 id="products-heading">Browse resources</h2>
+            <p>Explore the sample collection below.</p>
+          </div>
+          <a class="cart-shortcut" href="#cart">
+            View cart (<span id="cart-count">0</span>)
+          </a>
+        </div>
+
+        <div id="product-grid" class="product-grid" aria-live="polite"></div>
+      </section>
+
+      <section id="cart" class="cart-section" aria-labelledby="cart-heading">
+        <h2 id="cart-heading">Your cart</h2>
+        <p id="cart-empty" class="cart-empty">
+          Your cart is empty. Browse the resources above to get started.
+        </p>
+
+        <div id="cart-items" class="cart-items"></div>
+
+        <div id="cart-summary" class="cart-summary" hidden>
+          <p>
+            <span>Subtotal</span>
+            <strong id="cart-subtotal">$0.00</strong>
+          </p>
+          <p class="cart-note">
+            Taxes and checkout will be configured before the shop launches.
+          </p>
+          <button class="checkout-button" type="button" disabled>
+            Checkout coming soon
+          </button>
+          <button id="clear-cart" class="clear-cart-button" type="button">
+            Clear cart
+          </button>
+        </div>
+
+        <p id="cart-status" class="visually-hidden" aria-live="polite"></p>
+      </section>
+    </main>
+
+    <footer>
+      <p>
+        © <span data-site-year></span>
+        <span data-site-name></span>
+      </p>
+    </footer>
+
+    <script src="../js/main.js"></script>
+    <script src="../js/shop.js"></script>
+  </body>
+</html>

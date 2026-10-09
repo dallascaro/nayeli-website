@@ -1,7 +1,22 @@
 {
   "name": "nayeli",
+  "main": "src/index.js",
   "compatibility_date": "2026-10-06",
   "assets": {
-    "directory": "./site"
-  }
+    "directory": "./site",
+    "binding": "ASSETS",
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "nayeli-store",
+      "database_id": "9bec11e9-76d7-4c87-a878-05f4084eb52a",
+    },
+  ],
+  "r2_buckets": [
+    {
+      "binding": "PRODUCT_FILES",
+      "bucket_name": "nayeli-product-files",
+    },
+  ],
 }

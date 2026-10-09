@@ -1,0 +1,506 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Admin Dashboard | Nayeli Moreno</title>
+    <style>
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #f7f5f2;
+        color: #292929;
+      }
+
+      header {
+        background: white;
+        border-bottom: 1px solid #e8e3dd;
+        padding: 20px 24px;
+      }
+
+      header h1 { margin: 0; font-size: 22px; }
+
+      header p {
+        margin: 6px 0 0;
+        color: #686868;
+        font-size: 14px;
+      }
+
+      main {
+        width: min(900px, calc(100% - 32px));
+        margin: 32px auto;
+      }
+
+      .panel {
+        background: white;
+        border: 1px solid #e8e3dd;
+        border-radius: 12px;
+        padding: 24px;
+        margin-bottom: 20px;
+      }
+
+      h2 { font-size: 18px; margin: 0 0 18px; }
+
+      label {
+        display: block;
+        font-size: 14px;
+        font-weight: 600;
+        margin: 16px 0 6px;
+      }
+
+      input, textarea, select {
+        width: 100%;
+        padding: 11px 12px;
+        border: 1px solid #d8d2ca;
+        border-radius: 7px;
+        font: inherit;
+        background: white;
+      }
+
+      textarea { min-height: 90px; resize: vertical; }
+
+      button {
+        border: 0;
+        border-radius: 7px;
+        padding: 11px 16px;
+        background: #526b55;
+        color: white;
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      button:disabled { opacity: .55; cursor: not-allowed; }
+      .secondary { background: #eeeae4; color: #292929; }
+      .danger { background: #9d4141; }
+
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 16px;
+      }
+
+      .product {
+        border-top: 1px solid #eee9e3;
+        padding: 18px 0;
+      }
+
+      .product:first-child { border-top: 0; padding-top: 0; }
+      .product h3 { margin: 0 0 6px; font-size: 16px; }
+
+      .muted {
+        color: #6b6b6b;
+        font-size: 14px;
+        line-height: 1.5;
+      }
+
+      .status {
+        padding: 12px;
+        border-radius: 7px;
+        background: #f0eee9;
+        margin-bottom: 16px;
+        font-size: 14px;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+
+      .hidden { display: none; }
+
+      .price-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+
+      @media (max-width: 560px) {
+        .panel { padding: 18px; }
+        .price-row { grid-template-columns: 1fr; gap: 0; }
+      }
+    </style>
+  </head>
+
+  <body>
+    <header>
+      <h1>Nayeli Moreno — Admin</h1>
+      <p>Manage your digital resources</p>
+    </header>
+
+    <main>
+      <div id="status" class="status" role="status">
+        Connecting to the admin API…
+      </div>
+
+      <section class="panel">
+        <h2 id="form-title">Add a product</h2>
+
+        <form id="product-form">
+          <label for="name">Product name</label>
+          <input
+            id="name"
+            name="name"
+            required
+            maxlength="200"
+            placeholder="Feelings Check-In Cards"
+          />
+
+          <label for="description">Description</label>
+          <textarea
+            id="description"
+            name="description"
+            maxlength="10000"
+            placeholder="Describe the resource and who it helps."
+          ></textarea>
+
+          <div class="price-row">
+            <div>
+              <label for="price">Price in dollars</label>
+              <input
+                id="price"
+                name="price"
+                type="number"
+                min="0"
+                step="0.01"
+                required
+                placeholder="5.00"
+              />
+            </div>
+
+            <div>
+              <label for="category">Category</label>
+              <input
+                id="category"
+                name="category"
+                maxlength="100"
+                placeholder="Social-emotional learning"
+              />
+            </div>
+          </div>
+
+          <label for="preview-image">Preview image URL (optional)</label>
+          <input
+            id="preview-image"
+            name="preview_image"
+            type="url"
+            maxlength="1000"
+            placeholder="https://..."
+          />
+
+          <label for="file">PDF resource</label>
+          <input id="file" name="file" type="file" accept=".pdf,application/pdf" />
+          <p class="muted">
+            Upload a PDF up to 20 MB. Files are stored privately.
+            When editing, leave this empty to keep the existing PDF.
+          </p>
+
+          <div class="actions">
+            <button id="save-button" type="submit">Create product</button>
+            <button id="cancel-button" class="secondary hidden" type="button">
+              Cancel edit
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2>Your products</h2>
+        <p class="muted">
+          New products are saved as drafts. Publishing and customer checkout
+          are not enabled in this dashboard.
+        </p>
+        <div id="products">
+          <p class="muted">Loading products…</p>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      const API = "/api/admin/products";
+      const statusBox = document.getElementById("status");
+      const form = document.getElementById("product-form");
+      const productsBox = document.getElementById("products");
+      const saveButton = document.getElementById("save-button");
+      const cancelButton = document.getElementById("cancel-button");
+      const fileInput = document.getElementById("file");
+
+      let editingId = null;
+      let products = [];
+
+      function showStatus(message) {
+        statusBox.textContent = message;
+      }
+
+      async function api(url, options = {}) {
+        const response = await fetch(url, options);
+        const body = await response.text();
+
+        if (!response.ok) {
+          throw new Error(
+            response.status === 401 || response.status === 403
+              ? "Admin authentication failed. Confirm Cloudflare Access is enabled and you are signed in."
+              : body || `Request failed (${response.status}).`
+          );
+        }
+
+        if (!body) return null;
+
+        try {
+          return JSON.parse(body);
+        } catch {
+          return body;
+        }
+      }
+
+      function slugify(value) {
+        return value
+          .normalize("NFKD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .toLowerCase()
+          .trim()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-+|-+$/g, "")
+          .slice(0, 150)
+          .replace(/-+$/g, "");
+      }
+
+      function resetForm() {
+        editingId = null;
+        form.reset();
+        document.getElementById("form-title").textContent = "Add a product";
+        saveButton.textContent = "Create product";
+        cancelButton.classList.add("hidden");
+        fileInput.value = "";
+        delete fileInput.dataset.productId;
+      }
+
+      function addText(parent, tag, text, className = "") {
+        const element = document.createElement(tag);
+        element.textContent = text ?? "";
+        if (className) element.className = className;
+        parent.appendChild(element);
+        return element;
+      }
+
+      function renderProducts() {
+        productsBox.replaceChildren();
+
+        if (!products.length) {
+          addText(productsBox, "p", "No products yet.", "muted");
+          return;
+        }
+
+        for (const product of products) {
+          const card = document.createElement("article");
+          card.className = "product";
+
+          addText(card, "h3", product.name || "Untitled product");
+          addText(
+            card,
+            "p",
+            `$${Number(product.price || 0).toFixed(2)} · ${product.status || "draft"}`,
+            "muted"
+          );
+          addText(card, "p", `URL: /pages/shop.html#${product.url || ""}`, "muted");
+
+          if (product.description) {
+            addText(card, "p", product.description, "muted");
+          }
+
+          addText(
+            card,
+            "p",
+            product.file_name ? `PDF attached: ${product.file_name}` : "No PDF attached",
+            "muted"
+          );
+
+          const actions = document.createElement("div");
+          actions.className = "actions";
+
+          const edit = document.createElement("button");
+          edit.type = "button";
+          edit.className = "secondary";
+          edit.textContent = "Edit";
+          edit.addEventListener("click", () => editProduct(product));
+          actions.appendChild(edit);
+
+          if (product.status !== "archived") {
+            const archive = document.createElement("button");
+            archive.type = "button";
+            archive.className = "danger";
+            archive.textContent = "Archive";
+            archive.addEventListener("click", () => archiveProduct(product));
+            actions.appendChild(archive);
+          }
+
+          if (product.status === "draft") {
+            const upload = document.createElement("button");
+            upload.type = "button";
+            upload.textContent = product.file_name ? "Replace PDF" : "Upload PDF";
+            upload.addEventListener("click", () => {
+              fileInput.dataset.productId = product.id;
+              fileInput.click();
+            });
+            actions.appendChild(upload);
+          }
+
+          card.appendChild(actions);
+          productsBox.appendChild(card);
+        }
+      }
+
+      async function loadProducts() {
+        try {
+          const data = await api(API);
+          products = Array.isArray(data) ? data : data.products || [];
+          renderProducts();
+          showStatus("Connected. Product management is ready.");
+        } catch (error) {
+          productsBox.replaceChildren();
+          addText(productsBox, "p", error.message, "muted");
+          showStatus(error.message);
+        }
+      }
+
+      function editProduct(product) {
+        editingId = product.id;
+        document.getElementById("name").value = product.name || "";
+        document.getElementById("description").value = product.description || "";
+        document.getElementById("price").value = Number(product.price || 0);
+        document.getElementById("category").value = product.category || "";
+        document.getElementById("preview-image").value = product.preview_image || "";
+        fileInput.value = "";
+        delete fileInput.dataset.productId;
+
+        document.getElementById("form-title").textContent = "Edit product";
+        saveButton.textContent = "Save changes";
+        cancelButton.classList.remove("hidden");
+        form.scrollIntoView({ behavior: "smooth" });
+      }
+
+      async function archiveProduct(product) {
+        if (!confirm(`Archive "${product.name}"?`)) return;
+
+        try {
+          await api(`${API}/${encodeURIComponent(product.id)}`, {
+            method: "DELETE"
+          });
+          showStatus("Product archived.");
+          await loadProducts();
+        } catch (error) {
+          showStatus(error.message);
+        }
+      }
+
+      async function uploadPdf(productId, file) {
+        if (!file) return;
+
+        if (
+          file.type !== "application/pdf" &&
+          !file.name.toLowerCase().endsWith(".pdf")
+        ) {
+          throw new Error("Please select a PDF file.");
+        }
+
+        if (file.size > 20 * 1024 * 1024) {
+          throw new Error("The PDF must be 20 MB or smaller.");
+        }
+
+        const data = new FormData();
+        data.append("file", file);
+
+        await api(`${API}/${encodeURIComponent(productId)}/file`, {
+          method: "POST",
+          body: data
+        });
+      }
+
+      fileInput.addEventListener("change", async event => {
+        const input = event.currentTarget;
+        const productId = input.dataset.productId;
+        const file = input.files && input.files[0];
+
+        if (!productId || !file) return;
+
+        try {
+          showStatus("Uploading PDF…");
+          await uploadPdf(productId, file);
+          showStatus("PDF uploaded successfully.");
+          delete input.dataset.productId;
+          input.value = "";
+          await loadProducts();
+        } catch (error) {
+          showStatus(error.message);
+        }
+      });
+
+      cancelButton.addEventListener("click", resetForm);
+
+      form.addEventListener("submit", async event => {
+        event.preventDefault();
+        saveButton.disabled = true;
+
+        let productId = editingId;
+
+        try {
+          const name = document.getElementById("name").value.trim();
+          const url = slugify(name);
+          const price = Number(document.getElementById("price").value);
+
+          if (!url) {
+            throw new Error("Use a product name containing letters or numbers.");
+          }
+
+          if (!Number.isFinite(price) || price < 0) {
+            throw new Error("Enter a valid price in dollars.");
+          }
+
+          const values = {
+            url,
+            name,
+            description: document.getElementById("description").value.trim(),
+            price,
+            category: document.getElementById("category").value.trim(),
+            preview_image: document.getElementById("preview-image").value.trim() || null
+          };
+
+          if (editingId) {
+            // Keep existing product URLs stable while editing its name.
+            delete values.url;
+
+            await api(`${API}/${encodeURIComponent(editingId)}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(values)
+            });
+          } else {
+            const created = await api(API, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(values)
+            });
+
+            productId = created.id;
+          }
+
+          const selectedFile = fileInput.files && fileInput.files[0];
+
+          if (selectedFile && productId) {
+            await uploadPdf(productId, selectedFile);
+          }
+
+          resetForm();
+          showStatus("Product saved.");
+          await loadProducts();
+        } catch (error) {
+          showStatus(error.message);
+        } finally {
+          saveButton.disabled = false;
+        }
+      });
+
+      loadProducts();
+    </script>
+  </body>
+</html>
