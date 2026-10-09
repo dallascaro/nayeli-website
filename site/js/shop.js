@@ -1,39 +1,3 @@
-const PRODUCTS = [
-  {
-    id: "feelings-check-in",
-    title: "Feelings Check-In Cards",
-    category: "Social-Emotional Learning",
-    description:
-      "A sample set of prompts to help students identify and talk about their feelings.",
-    price: 5.0,
-    format: "Printable PDF",
-    symbol: "💛",
-    cover: "cover-yellow",
-  },
-  {
-    id: "executive-functioning",
-    title: "Executive Functioning Visuals",
-    category: "Student Supports",
-    description:
-      "Sample visual supports for routines, organization, and getting started on tasks.",
-    price: 7.0,
-    format: "Printable PDF",
-    symbol: "🧠",
-    cover: "cover-pink",
-  },
-  {
-    id: "session-planner",
-    title: "School Psych Session Planner",
-    category: "School Psychologist Tools",
-    description:
-      "A sample planner for organizing counseling sessions and tracking activities.",
-    price: 4.0,
-    format: "Digital planner",
-    symbol: "🍎",
-    cover: "cover-green",
-  },
-];
-
 const productGrid = document.querySelector("#product-grid");
 const cartItems = document.querySelector("#cart-items");
 const cartEmpty = document.querySelector("#cart-empty");
@@ -43,7 +7,67 @@ const cartSubtotal = document.querySelector("#cart-subtotal");
 const cartStatus = document.querySelector("#cart-status");
 const clearCartButton = document.querySelector("#clear-cart");
 
-const cart = new Map();
+let PRODUCTS = [];
+
+async function loadProducts() {
+  productGrid.setAttribute("aria-busy", "true");
+
+  try {
+    const response = await fetch("/api/products");
+
+    if (!response.ok) {
+      throw new Error(`Product request failed: ${response.status}`);
+    }
+
+    const data = await response.json();
+
+    PRODUCTS = data.products.map((product) => ({
+      ...product,
+      title: product.name,
+      format: "Digital resource",
+      symbol: "📄",
+      cover: "cover-yellow",
+    }));
+
+    renderProducts();
+  } catch (error) {
+    productGrid.innerHTML =
+      '<p role="status">Products could not be loaded. Please try again later.</p>';
+    console.error("Failed to load products:", error);
+  } finally {
+    productGrid.removeAttribute("aria-busy");
+  }
+  renderCart();
+}
+
+const CART_STORAGE_KEY = "school-psych-ny-cart";
+
+function loadSavedCart() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(CART_STORAGE_KEY) || "[]");
+
+    if (!Array.isArray(saved)) return new Map();
+
+    return new Map(
+      saved.filter(
+        (entry) =>
+          Array.isArray(entry) &&
+          entry.length === 2 &&
+          typeof entry[0] === "string" &&
+          Number.isInteger(entry[1]) &&
+          entry[1] > 0,
+      ),
+    );
+  } catch {
+    return new Map();
+  }
+}
+
+const cart = loadSavedCart();
+
+function saveCart() {
+  localStorage.setItem(CART_STORAGE_KEY, JSON.stringify([...cart.entries()]));
+}
 
 const formatPrice = (price) =>
   new Intl.NumberFormat("en-US", {
@@ -52,6 +76,12 @@ const formatPrice = (price) =>
   }).format(price);
 
 function renderProducts() {
+  if (PRODUCTS.length === 0) {
+    productGrid.innerHTML =
+      '<p role="status">No products available yet. Please check back soon.</p>';
+    return;
+  }
+
   productGrid.innerHTML = PRODUCTS.map(
     (product) => `
       <article class="product-card">
@@ -88,7 +118,7 @@ function renderCart() {
 
   const subtotal = entries.reduce((sum, [id, quantity]) => {
     const product = PRODUCTS.find((item) => item.id === id);
-    return sum + product.price * quantity;
+    return sum + (product ? product.price * quantity : 0);
   }, 0);
 
   cartCount.textContent = itemCount;
@@ -98,6 +128,7 @@ function renderCart() {
   cartItems.innerHTML = entries
     .map(([id, quantity]) => {
       const product = PRODUCTS.find((item) => item.id === id);
+      if (!product) return "";
 
       return `
         <div class="cart-item">
@@ -148,6 +179,7 @@ productGrid.addEventListener("click", (event) => {
   if (!product) return;
 
   cart.set(productId, (cart.get(productId) || 0) + 1);
+  saveCart();
   renderCart();
 
   cartStatus.textContent = `${product.title} added to your cart.`;
@@ -173,15 +205,143 @@ cartItems.addEventListener("click", (event) => {
     cart.set(productId, quantity + 1);
   }
 
+  saveCart();
   renderCart();
   cartStatus.textContent = "Cart updated.";
 });
 
 clearCartButton.addEventListener("click", () => {
   cart.clear();
+  saveCart();
   renderCart();
   cartStatus.textContent = "Cart cleared.";
 });
 
-renderProducts();
+const checkoutForm = document.querySelector("#checkout-form");
+const checkoutName = document.querySelector("#checkout-name");
+const checkoutEmail = document.querySelector("#checkout-email");
+const checkoutButton = document.querySelector("#checkout-button");
+const checkoutFormStatus = document.querySelector("#checkout-form-status");
+const checkoutNameError = document.querySelector("#checkout-name-error");
+const checkoutEmailError = document.querySelector("#checkout-email-error");
+
+const orderConfirmation = document.querySelector("#order-confirmation");
+const confirmationOrderNumber = document.querySelector(
+  "#confirmation-order-number",
+);
+const confirmationOrderTotal = document.querySelector(
+  "#confirmation-order-total",
+);
+const confirmationCopyStatus = document.querySelector(
+  "#confirmation-copy-status",
+);
+const copyOrderDetailsButton = document.querySelector("#copy-order-details");
+const closeOrderConfirmationButton = document.querySelector(
+  "#close-order-confirmation",
+);
+
+let completedOrderDetails = "";
+
+copyOrderDetailsButton.addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText(completedOrderDetails);
+    confirmationCopyStatus.textContent = "Order details copied.";
+  } catch {
+    confirmationCopyStatus.textContent =
+      "Copying wasn't available. Please select and copy the order details manually.";
+  }
+});
+
+closeOrderConfirmationButton.addEventListener("click", () => {
+  orderConfirmation.close();
+});
+
+function validateCheckout() {
+  const name = checkoutName.value.trim();
+  const email = checkoutEmail.value.trim();
+  const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+  const nameValid = name.length > 0;
+  const emailValid = emailPattern.test(email);
+
+  checkoutNameError.textContent = nameValid
+    ? ""
+    : "Please enter your full name.";
+  checkoutNameError.hidden = nameValid;
+
+  checkoutEmailError.textContent = emailValid
+    ? ""
+    : "Please enter a valid email address.";
+  checkoutEmailError.hidden = emailValid;
+
+  const cartHasItems = [...cart.entries()].some(
+    ([id, quantity]) =>
+      quantity > 0 && PRODUCTS.some((product) => product.id === id),
+  );
+
+  checkoutButton.disabled = !nameValid || !emailValid || !cartHasItems;
+
+  return nameValid && emailValid && cartHasItems;
+}
+
+checkoutName.addEventListener("input", validateCheckout);
+checkoutEmail.addEventListener("input", validateCheckout);
+
+checkoutForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+
+  if (!validateCheckout()) {
+    checkoutFormStatus.textContent = "Please review the highlighted fields.";
+    return;
+  }
+
+  const confirmed = window.confirm(
+    "One last check: please confirm your email address is correct and your cart contains the resources you want. Continue with this development-only purchase simulation? No payment will be taken.",
+  );
+
+  if (!confirmed) {
+    checkoutFormStatus.textContent = "No problem. Please review your details.";
+    return;
+  }
+
+  checkoutButton.disabled = true;
+  checkoutFormStatus.textContent = "Preparing secure Stripe checkout...";
+
+  try {
+    const response = await fetch("/api/checkout/create-session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: checkoutName.value.trim(),
+        email: checkoutEmail.value.trim(),
+        items: [...cart.entries()].map(([id, quantity]) => ({ id, quantity })),
+      }),
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      throw new Error(result.error || "Unable to record the test order.");
+    }
+
+    if (!result.checkoutUrl || typeof result.checkoutUrl !== "string") {
+      throw new Error(
+        "Stripe did not return a checkout link. Please try again.",
+      );
+    }
+
+    window.location.assign(result.checkoutUrl);
+    return;
+  } catch (error) {
+    checkoutFormStatus.textContent =
+      error.message || "Something went wrong. Please try again.";
+  } finally {
+    validateCheckout();
+  }
+});
+
+loadProducts().then(() => {
+  renderCart();
+  validateCheckout();
+});
 renderCart();

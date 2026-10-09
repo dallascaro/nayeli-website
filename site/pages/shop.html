@@ -66,11 +66,50 @@
             <strong id="cart-subtotal">$0.00</strong>
           </p>
           <p class="cart-note">
-            Taxes and checkout will be configured before the shop launches.
+            This is a development checkout simulation. No payment will be taken.
           </p>
-          <button class="checkout-button" type="button" disabled>
-            Checkout coming soon
-          </button>
+
+          <form id="checkout-form" novalidate>
+            <h3>Checkout</h3>
+
+            <label for="checkout-name">Full name</label>
+            <input
+              id="checkout-name"
+              name="name"
+              type="text"
+              autocomplete="name"
+              maxlength="120"
+              required
+            />
+            <p id="checkout-name-error" class="checkout-field-error" hidden></p>
+
+            <label for="checkout-email">Email address</label>
+            <input
+              id="checkout-email"
+              name="email"
+              type="email"
+              autocomplete="email"
+              maxlength="254"
+              required
+            />
+            <p
+              id="checkout-email-error"
+              class="checkout-field-error"
+              hidden
+            ></p>
+
+            <p id="checkout-form-status" role="status" aria-live="polite"></p>
+
+            <button
+              id="checkout-button"
+              class="checkout-button"
+              type="submit"
+              disabled
+            >
+              Review your order
+            </button>
+          </form>
+
           <button id="clear-cart" class="clear-cart-button" type="button">
             Clear cart
           </button>
@@ -79,7 +118,40 @@
         <p id="cart-status" class="visually-hidden" aria-live="polite"></p>
       </section>
     </main>
+    <dialog id="order-confirmation" class="order-confirmation">
+      <div class="order-confirmation-content">
+        <div class="order-confirmation-icon" aria-hidden="true">✓</div>
+        <h2>Order confirmed!</h2>
+        <p class="order-confirmation-intro">
+          Your test order has been recorded successfully.
+        </p>
 
+        <div class="order-confirmation-details">
+          <p>
+            <span>Order number</span>
+            <strong id="confirmation-order-number"></strong>
+          </p>
+          <p>
+            <span>Order total</span>
+            <strong id="confirmation-order-total"></strong>
+          </p>
+        </div>
+
+        <p class="order-confirmation-notice">
+          This is a development checkout. No payment was taken, and your order
+          is still pending.
+        </p>
+
+        <p id="confirmation-copy-status" role="status" aria-live="polite"></p>
+
+        <div class="order-confirmation-actions">
+          <button id="copy-order-details" type="button">
+            Copy order details
+          </button>
+          <button id="close-order-confirmation" type="button">Close</button>
+        </div>
+      </div>
+    </dialog>
     <footer>
       <p>
         © <span data-site-year></span>

@@ -19,4 +19,27 @@
       "bucket_name": "nayeli-product-files",
     },
   ],
+  "env": {
+    "dev": {
+      "name": "nayeli-dev",
+      "vars": {
+        "ACCESS_AUDIENCE": "e5ec2d288cf8eda750ace4d0fb5be50df9b14bbcf43357313a11ae0e6e3bd1ac",
+        "ENVIRONMENT": "development",
+        "WORKER_NAME": "nayeli-dev",
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "nayeli-store-dev",
+          "database_id": "a7dc29a5-2081-4669-b3e0-6f2880ab28ec",
+        },
+      ],
+      "r2_buckets": [
+        {
+          "binding": "PRODUCT_FILES",
+          "bucket_name": "nayeli-product-files-dev",
+        },
+      ],
+    },
+  },
 }
