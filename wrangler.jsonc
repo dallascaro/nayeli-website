@@ -23,7 +23,7 @@
     "dev": {
       "name": "nayeli-dev",
       "vars": {
-        "ACCESS_AUDIENCE": "e5ec2d288cf8eda750ace4d0fb5be50df9b14bbcf43357313a11ae0e6e3bd1ac",
+        "ACCESS_AUDIENCE": "6197ec530f8ef7988f80042cca3da9a95544739ef534464d8e8814354a2f8157",
         "ENVIRONMENT": "development",
         "WORKER_NAME": "nayeli-dev",
       },

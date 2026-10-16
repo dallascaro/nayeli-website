@@ -22,7 +22,11 @@ async function requireAdminAccess(request, env) {
       audience: ACCESS_AUDIENCE(env),
     });
 
-    if (payload.email !== "schoolpsychny@gmail.com") {
+    if (
+      !["schoolpsychny@gmail.com", "dallascaro98@gmail.com"].includes(
+        payload.email,
+      )
+    ) {
       return new Response("Forbidden", { status: 403 });
     }
 
@@ -32,6 +36,224 @@ async function requireAdminAccess(request, env) {
   }
 }
 
+async function sendResendEmail(env, { to, subject, html, idempotencyKey }) {
+  if (env.ENVIRONMENT !== "development" || env.WORKER_NAME !== "nayeli-dev") {
+    throw new Error("Email sending is restricted to development.");
+  }
+
+  if (!env.RESEND_API_KEY) {
+    throw new Error("Resend API key is not configured.");
+  }
+
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${env.RESEND_API_KEY}`,
+      "Content-Type": "application/json",
+      ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
+    },
+    body: JSON.stringify({
+      from: "School Psych NY Orders <orders@send.schoolpsychny.com>",
+      to: [to],
+      reply_to: "schoolpsychny@gmail.com",
+      subject,
+      html,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Resend email failed with status ${response.status}.`);
+  }
+
+  return response.json();
+}
+
+function buildOrderConfirmationEmail(order, purchase, downloads = []) {
+  const items = Array.isArray(purchase?.items) ? purchase.items : [];
+  const escapeHtml = (value) =>
+    String(value ?? "").replace(
+      /[&<>"']/g,
+      (char) =>
+        ({
+          "&": "&amp;",
+          "<": "&lt;",
+          ">": "&gt;",
+          '"': "&quot;",
+          "'": "&#39;",
+        })[char],
+    );
+
+  const itemRows = items
+    .map(
+      (item) => `
+    <tr>
+      <td style="padding:8px;border-bottom:1px solid #eee;">
+        ${escapeHtml(item.name)} × ${Number(item.quantity) || 1}
+      </td>
+      <td style="padding:8px;border-bottom:1px solid #eee;text-align:right;">
+        $${((Number(item.lineTotalCents) || 0) / 100).toFixed(2)}
+      </td>
+    </tr>
+  `,
+    )
+    .join("");
+
+  const downloadRows = downloads
+    .map(
+      (download) => `
+        <li style="margin:12px 0;">
+          <strong>${escapeHtml(download.name)}</strong><br>
+          <a href="${escapeHtml(download.url)}"
+             style="display:inline-block;margin-top:6px;padding:10px 16px;background:#263b32;color:#fff;text-decoration:none;border-radius:5px;">
+            Download PDF
+          </a>
+        </li>
+      `,
+    )
+    .join("");
+
+  return {
+    subject: `Your School Psych NY order ${order.order_number}`,
+    html: `
+      <div style="font-family:Arial,sans-serif;max-width:600px;margin:auto;color:#333;">
+        <h1>Thank you for your purchase!</h1>
+        <p>Hi ${escapeHtml(purchase?.name || "there")},</p>
+        <p>Your payment was confirmed. Here are your order details:</p>
+        <p><strong>Order:</strong> ${escapeHtml(order.order_number)}</p>
+        <table style="width:100%;border-collapse:collapse;">
+          ${itemRows}
+          <tr>
+            <td style="padding:10px 8px;"><strong>Total</strong></td>
+            <td style="padding:10px 8px;text-align:right;">
+              <strong>$${Number(order.total_paid).toFixed(2)}</strong>
+            </td>
+          </tr>
+        </table>
+        <h2>Your digital downloads</h2>
+        <p>Use the links below to download your purchases. These links expire after eight hours, so save your files to your device.</p>
+        <ul style="padding-left:20px;">${downloadRows}</ul>
+        <p>Questions? Reply to this email or contact
+          <a href="mailto:schoolpsychny@gmail.com">schoolpsychny@gmail.com</a>.
+        </p>
+        <p>Thank you,<br>School Psych NY</p>
+      </div>
+    `,
+  };
+}
+
+async function createDownloadToken() {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  const token = Array.from(bytes, (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
+
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(token),
+  );
+
+  const tokenHash = Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
+
+  return {
+    token,
+    tokenHash,
+    expiresAt: new Date(Date.now() + 8 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 19)
+      .replace("T", " "),
+  };
+}
+
+async function getDownloadEncryptionKey(env) {
+  if (!env.DOWNLOAD_SIGNING_SECRET) {
+    throw new Error("Download encryption secret is not configured.");
+  }
+
+  const material = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(env.DOWNLOAD_SIGNING_SECRET),
+  );
+
+  return crypto.subtle.importKey("raw", material, { name: "AES-GCM" }, false, [
+    "encrypt",
+    "decrypt",
+  ]);
+}
+
+async function encryptDownloadToken(env, token) {
+  const key = await getDownloadEncryptionKey(env);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    key,
+    new TextEncoder().encode(token),
+  );
+
+  const bytes = new Uint8Array(iv.length + ciphertext.byteLength);
+  bytes.set(iv);
+  bytes.set(new Uint8Array(ciphertext), iv.length);
+
+  return btoa(String.fromCharCode(...bytes));
+}
+
+async function decryptDownloadToken(env, encoded) {
+  const bytes = Uint8Array.from(atob(encoded), (char) => char.charCodeAt(0));
+  if (bytes.length < 29) {
+    throw new Error("Stored download token is invalid.");
+  }
+
+  const iv = bytes.slice(0, 12);
+  const ciphertext = bytes.slice(12);
+  const key = await getDownloadEncryptionKey(env);
+  const plaintext = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv },
+    key,
+    ciphertext,
+  );
+
+  return new TextDecoder().decode(plaintext);
+}
+
+async function saveDownloadLink(env, orderId) {
+  const existing = await env.DB.prepare(
+    `SELECT id, token_ciphertext, expires_at
+     FROM download_links
+     WHERE order_id = ?
+       AND revoked_at IS NULL
+       AND expires_at > CURRENT_TIMESTAMP
+     ORDER BY created_at DESC
+     LIMIT 1`,
+  )
+    .bind(orderId)
+    .first();
+
+  if (existing?.token_ciphertext) {
+    const token = await decryptDownloadToken(env, existing.token_ciphertext);
+    return { token, expiresAt: existing.expires_at };
+  }
+
+  const { token, tokenHash, expiresAt } = await createDownloadToken();
+  const tokenCiphertext = await encryptDownloadToken(env, token);
+  const id = crypto.randomUUID();
+
+  const inserted = await env.DB.prepare(
+    `INSERT INTO download_links (id, token_hash, token_ciphertext, order_id, expires_at)
+     SELECT ?, ?, ?, id, ?
+     FROM orders
+     WHERE id = ? AND payment_status = 'paid'`,
+  )
+    .bind(id, tokenHash, tokenCiphertext, expiresAt, orderId)
+    .run();
+
+  if (inserted.meta?.changes !== 1) {
+    throw new Error("Could not create a download link for the paid order.");
+  }
+
+  return { token, expiresAt };
+}
+
 function jsonError(message, status = 400) {
   return Response.json({ error: message }, { status });
 }
@@ -39,12 +261,18 @@ function jsonError(message, status = 400) {
 async function verifyStripeSignature(rawBody, signatureHeader, secret) {
   if (!signatureHeader || !secret) return false;
 
-  const parts = signatureHeader.split(",").map((part) => part.trim().split("="));
+  const parts = signatureHeader
+    .split(",")
+    .map((part) => part.trim().split("="));
   const timestamp = parts.find(([key]) => key === "t")?.[1];
-  const signatures = parts.filter(([key]) => key === "v1").map(([, value]) => value);
+  const signatures = parts
+    .filter(([key]) => key === "v1")
+    .map(([, value]) => value);
 
-  if (!timestamp || !/^\d+$/.test(timestamp) || signatures.length === 0) return false;
-  if (Math.abs(Math.floor(Date.now() / 1000) - Number(timestamp)) > 300) return false;
+  if (!timestamp || !/^\d+$/.test(timestamp) || signatures.length === 0)
+    return false;
+  if (Math.abs(Math.floor(Date.now() / 1000) - Number(timestamp)) > 300)
+    return false;
 
   const encoder = new TextEncoder();
   const key = await crypto.subtle.importKey(
@@ -58,13 +286,16 @@ async function verifyStripeSignature(rawBody, signatureHeader, secret) {
   const digest = new Uint8Array(
     await crypto.subtle.sign("HMAC", key, encoder.encode(signedPayload)),
   );
-  const expected = [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  const expected = [...digest]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
 
   return signatures.some((signature) => {
     if (!/^[a-f0-9]{64}$/i.test(signature)) return false;
     let difference = 0;
     for (let i = 0; i < expected.length; i++) {
-      difference |= expected.charCodeAt(i) ^ signature.toLowerCase().charCodeAt(i);
+      difference |=
+        expected.charCodeAt(i) ^ signature.toLowerCase().charCodeAt(i);
     }
     return difference === 0;
   });
@@ -157,11 +388,17 @@ export default {
 
     // Development-only Stripe webhook. Verify signatures before processing events.
     if (url.pathname === "/api/stripe/webhook") {
-      if (env.ENVIRONMENT !== "development" || env.WORKER_NAME !== "nayeli-dev") {
+      if (
+        env.ENVIRONMENT !== "development" ||
+        env.WORKER_NAME !== "nayeli-dev"
+      ) {
         return jsonError("Not found.", 404);
       }
       if (request.method !== "POST") {
-        return new Response("Method Not Allowed", { status: 405, headers: { Allow: "POST" } });
+        return new Response("Method Not Allowed", {
+          status: 405,
+          headers: { Allow: "POST" },
+        });
       }
       if (!env.STRIPE_WEBHOOK_SECRET) {
         return jsonError("Stripe webhook is not configured.", 503);
@@ -189,17 +426,117 @@ export default {
 
       if (event.type === "checkout.session.completed") {
         const session = event.data?.object;
-        if (session?.payment_status === "paid" && session?.id && session?.client_reference_id) {
+
+        if (
+          session?.payment_status === "paid" &&
+          session?.id &&
+          session?.client_reference_id
+        ) {
+          const orderId = session.client_reference_id;
+
           await env.DB.prepare(
             "UPDATE orders SET payment_status = 'paid' WHERE id = ? AND payment_reference = ? AND payment_status = 'pending'",
-          ).bind(session.client_reference_id, session.id).run();
+          )
+            .bind(orderId, session.id)
+            .run();
+
+          const order = await env.DB.prepare(
+            "SELECT id, order_number, customer_email, total_paid, payment_status, payment_reference, original_purchase FROM orders WHERE id = ? AND payment_reference = ? AND payment_status = 'paid'",
+          )
+            .bind(orderId, session.id)
+            .first();
+
+          if (order) {
+            const deliveryId = `receipt-${order.id}`;
+
+            await env.DB.prepare(
+              "INSERT OR IGNORE INTO email_delivery (id, order_id, recipient_email, delivery_status) VALUES (?, ?, ?, 'pending')",
+            )
+              .bind(deliveryId, order.id, order.customer_email)
+              .run();
+
+            const claimToken = crypto.randomUUID();
+
+            const claim = await env.DB.prepare(
+              "UPDATE email_delivery SET delivery_status = 'sending', claim_token = ?, claim_expires_at = datetime('now', '+15 minutes'), updated_at = CURRENT_TIMESTAMP WHERE id = ? AND (delivery_status IN ('pending', 'failed') OR (delivery_status = 'sending' AND claim_expires_at <= CURRENT_TIMESTAMP))",
+            )
+              .bind(claimToken, deliveryId)
+              .run();
+
+            if (claim.meta?.changes === 1) {
+              try {
+                const purchase = JSON.parse(order.original_purchase || "{}");
+                const items = Array.isArray(purchase?.items)
+                  ? purchase.items
+                  : [];
+
+                if (items.length === 0) {
+                  throw new Error("Paid order has no purchased items.");
+                }
+
+                const { token } = await saveDownloadLink(env, order.id);
+                const downloadBaseUrl =
+                  "https://nayeli-dev.dallascaro98.workers.dev/api/download";
+
+                const uniqueItems = [
+                  ...new Map(
+                    items
+                      .filter((item) => typeof item?.productId === "string")
+                      .map((item) => [item.productId, item]),
+                  ).values(),
+                ];
+
+                if (uniqueItems.length === 0) {
+                  throw new Error("Paid order has no valid product IDs.");
+                }
+
+                const downloads = uniqueItems.map((item) => ({
+                  name: item.name,
+                  url: `${downloadBaseUrl}?token=${encodeURIComponent(token)}&productId=${encodeURIComponent(item.productId)}`,
+                }));
+
+                const email = buildOrderConfirmationEmail(
+                  order,
+                  purchase,
+                  downloads,
+                );
+
+                await sendResendEmail(env, {
+                  to: order.customer_email,
+                  subject: email.subject,
+                  html: email.html,
+                  idempotencyKey: `school-psych-ny-receipt-${order.id}`,
+                });
+
+                await env.DB.prepare(
+                  "UPDATE email_delivery SET delivery_status = 'sent', last_sent_at = CURRENT_TIMESTAMP, claim_token = NULL, claim_expires_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND claim_token = ?",
+                )
+                  .bind(deliveryId, claimToken)
+                  .run();
+              } catch (error) {
+                await env.DB.prepare(
+                  "UPDATE email_delivery SET delivery_status = 'failed', claim_token = NULL, claim_expires_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND claim_token = ?",
+                )
+                  .bind(deliveryId, claimToken)
+                  .run();
+
+                console.error("Order confirmation email failed:", error);
+                return jsonError(
+                  "Order was paid, but email delivery failed.",
+                  500,
+                );
+              }
+            }
+          }
         }
       } else if (event.type === "checkout.session.expired") {
         const session = event.data?.object;
         if (session?.id && session?.client_reference_id) {
           await env.DB.prepare(
             "UPDATE orders SET payment_status = 'cancelled' WHERE id = ? AND payment_reference = ? AND payment_status = 'pending'",
-          ).bind(session.client_reference_id, session.id).run();
+          )
+            .bind(session.client_reference_id, session.id)
+            .run();
         }
       }
 
@@ -533,13 +870,101 @@ export default {
 
       return jsonError("Not found.", 404);
     }
+    // Development-only verification for a Stripe Checkout return.
+    if (url.pathname === "/api/checkout/verify-session") {
+      if (
+        env.ENVIRONMENT !== "development" ||
+        env.WORKER_NAME !== "nayeli-dev"
+      ) {
+        return jsonError("Not found.", 404);
+      }
+
+      if (request.method !== "GET") {
+        return new Response("Method Not Allowed", {
+          status: 405,
+          headers: { Allow: "GET" },
+        });
+      }
+
+      if (
+        !env.STRIPE_SECRET_KEY ||
+        !env.STRIPE_SECRET_KEY.startsWith("sk_test_")
+      ) {
+        return jsonError("Stripe test mode is not configured.", 503);
+      }
+
+      const sessionId = url.searchParams.get("session_id") || "";
+      if (!/^cs_test_[a-zA-Z0-9_]+$/.test(sessionId)) {
+        return jsonError("Invalid checkout session.", 400);
+      }
+
+      let stripeResponse;
+      let session;
+      try {
+        stripeResponse = await fetch(
+          `https://api.stripe.com/v1/checkout/sessions/${encodeURIComponent(sessionId)}`,
+          {
+            headers: {
+              Authorization: `Bearer ${env.STRIPE_SECRET_KEY}`,
+            },
+          },
+        );
+        session = await stripeResponse.json();
+      } catch {
+        return jsonError("Unable to verify checkout with Stripe.", 502);
+      }
+
+      if (!stripeResponse.ok || !session?.id) {
+        return jsonError("Unable to verify checkout session.", 502);
+      }
+
+      const orderId =
+        typeof session.client_reference_id === "string"
+          ? session.client_reference_id
+          : "";
+
+      if (!orderId) {
+        return jsonError("Checkout session has no matching order.", 403);
+      }
+
+      const order = await env.DB.prepare(
+        `SELECT id, payment_status, payment_reference
+         FROM orders
+         WHERE id = ? AND payment_reference = ?`,
+      )
+        .bind(orderId, session.id)
+        .first();
+
+      if (!order) {
+        return jsonError("Checkout session does not match an order.", 403);
+      }
+
+      if (
+        session.payment_status !== "paid" ||
+        order.payment_status !== "paid"
+      ) {
+        return Response.json(
+          { verified: false, paymentStatus: order.payment_status },
+          { status: 202 },
+        );
+      }
+
+      return Response.json({
+        verified: true,
+        paymentStatus: "paid",
+      });
+    }
+
     // Development-only Stripe Checkout session creation.
     if (url.pathname === "/api/checkout/create-session") {
       if (
         env.ENVIRONMENT !== "development" ||
         env.WORKER_NAME !== "nayeli-dev"
       ) {
-        return jsonError("Stripe test checkout is only available in development.", 403);
+        return jsonError(
+          "Stripe test checkout is only available in development.",
+          403,
+        );
       }
 
       if (request.method !== "POST") {
@@ -549,7 +974,10 @@ export default {
         });
       }
 
-      if (!env.STRIPE_SECRET_KEY || !env.STRIPE_SECRET_KEY.startsWith("sk_test_")) {
+      if (
+        !env.STRIPE_SECRET_KEY ||
+        !env.STRIPE_SECRET_KEY.startsWith("sk_test_")
+      ) {
         return jsonError("Stripe test mode is not configured.", 503);
       }
 
@@ -637,7 +1065,10 @@ export default {
       }
 
       if (totalCents <= 0) {
-        return jsonError("Your cart total must be greater than $0.00 to use Stripe Checkout.", 400);
+        return jsonError(
+          "Your cart total must be greater than $0.00 to use Stripe Checkout.",
+          400,
+        );
       }
 
       const orderId = crypto.randomUUID();
@@ -654,7 +1085,11 @@ export default {
           orderNumber,
           email,
           totalCents / 100,
-          JSON.stringify({ name, items: purchasedItems, paymentProvider: "stripe" }),
+          JSON.stringify({
+            name,
+            items: purchasedItems,
+            paymentProvider: "stripe",
+          }),
         )
         .run();
 
@@ -662,56 +1097,86 @@ export default {
       form.set("mode", "payment");
       form.set("customer_email", email);
       form.set("client_reference_id", orderId);
-      form.set("success_url", "https://nayeli-dev.dallascaro98.workers.dev/pages/shop.html?checkout=success&session_id={CHECKOUT_SESSION_ID}");
-      form.set("cancel_url", "https://nayeli-dev.dallascaro98.workers.dev/pages/shop.html?checkout=cancelled");
+      form.set(
+        "success_url",
+        "https://nayeli-dev.dallascaro98.workers.dev/pages/shop.html?checkout=success&session_id={CHECKOUT_SESSION_ID}",
+      );
+      form.set(
+        "cancel_url",
+        "https://nayeli-dev.dallascaro98.workers.dev/pages/shop.html?checkout=cancelled",
+      );
       form.set("metadata[order_id]", orderId);
       form.set("metadata[order_number]", orderNumber);
       form.set("metadata[customer_name]", name);
 
       for (const [index, item] of lineItems.entries()) {
-        form.set(`line_items[${index}][price_data][currency]`, item.price_data.currency);
-        form.set(`line_items[${index}][price_data][product_data][name]`, item.price_data.product_data.name);
-        form.set(`line_items[${index}][price_data][unit_amount]`, String(item.price_data.unit_amount));
+        form.set(
+          `line_items[${index}][price_data][currency]`,
+          item.price_data.currency,
+        );
+        form.set(
+          `line_items[${index}][price_data][product_data][name]`,
+          item.price_data.product_data.name,
+        );
+        form.set(
+          `line_items[${index}][price_data][unit_amount]`,
+          String(item.price_data.unit_amount),
+        );
         form.set(`line_items[${index}][quantity]`, String(item.quantity));
       }
 
       let stripeResponse;
       let session;
       try {
-        stripeResponse = await fetch("https://api.stripe.com/v1/checkout/sessions", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${env.STRIPE_SECRET_KEY}`,
-            "Content-Type": "application/x-www-form-urlencoded",
+        stripeResponse = await fetch(
+          "https://api.stripe.com/v1/checkout/sessions",
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${env.STRIPE_SECRET_KEY}`,
+              "Content-Type": "application/x-www-form-urlencoded",
+            },
+            body: form,
           },
-          body: form,
-        });
+        );
         session = await stripeResponse.json();
       } catch {
         await env.DB.prepare(
           "UPDATE orders SET payment_status = 'failed' WHERE id = ?",
-        ).bind(orderId).run();
+        )
+          .bind(orderId)
+          .run();
         return jsonError("Unable to connect to Stripe. Please try again.", 502);
       }
 
       if (!stripeResponse.ok || !session?.id || !session?.url) {
         await env.DB.prepare(
           "UPDATE orders SET payment_status = 'failed' WHERE id = ?",
-        ).bind(orderId).run();
-        return jsonError("Stripe could not create checkout. Please try again.", 502);
+        )
+          .bind(orderId)
+          .run();
+        return jsonError(
+          "Stripe could not create checkout. Please try again.",
+          502,
+        );
       }
 
       await env.DB.prepare(
         "UPDATE orders SET payment_reference = ? WHERE id = ?",
-      ).bind(session.id, orderId).run();
+      )
+        .bind(session.id, orderId)
+        .run();
 
-      return Response.json({
-        success: true,
-        checkoutUrl: session.url,
-        orderNumber,
-        total: totalCents / 100,
-        paymentStatus: "pending",
-      }, { status: 201 });
+      return Response.json(
+        {
+          success: true,
+          checkoutUrl: session.url,
+          orderNumber,
+          total: totalCents / 100,
+          paymentStatus: "pending",
+        },
+        { status: 201 },
+      );
     }
 
     // Development-only simulated checkout. Never processes real payments.
@@ -836,6 +1301,103 @@ export default {
         },
         { status: 201 },
       );
+    }
+
+    // Development-only private product download.
+    if (url.pathname === "/api/download") {
+      if (
+        env.ENVIRONMENT !== "development" ||
+        env.WORKER_NAME !== "nayeli-dev"
+      ) {
+        return jsonError("Not found.", 404);
+      }
+
+      if (request.method !== "GET") {
+        return new Response("Method Not Allowed", {
+          status: 405,
+          headers: { Allow: "GET" },
+        });
+      }
+
+      const token = url.searchParams.get("token") || "";
+      const productId = url.searchParams.get("productId") || "";
+
+      if (
+        !/^[a-f0-9]{64}$/.test(token) ||
+        !/^[a-zA-Z0-9_-]{1,100}$/.test(productId)
+      ) {
+        return jsonError("This download link is invalid or expired.", 403);
+      }
+
+      const digest = await crypto.subtle.digest(
+        "SHA-256",
+        new TextEncoder().encode(token),
+      );
+      const tokenHash = Array.from(new Uint8Array(digest), (byte) =>
+        byte.toString(16).padStart(2, "0"),
+      ).join("");
+
+      const access = await env.DB.prepare(
+        `SELECT dl.order_id, o.original_purchase
+         FROM download_links dl
+         JOIN orders o ON o.id = dl.order_id
+         WHERE dl.token_hash = ?
+           AND dl.revoked_at IS NULL
+           AND dl.expires_at > CURRENT_TIMESTAMP
+           AND o.payment_status = 'paid'
+         LIMIT 1`,
+      )
+        .bind(tokenHash)
+        .first();
+
+      if (!access) {
+        return jsonError("This download link is invalid or expired.", 403);
+      }
+
+      let purchase;
+      try {
+        purchase = JSON.parse(access.original_purchase || "{}");
+      } catch {
+        return jsonError("The purchase record could not be verified.", 403);
+      }
+
+      const purchased = Array.isArray(purchase?.items)
+        ? purchase.items.some((item) => item?.productId === productId)
+        : false;
+
+      if (!purchased) {
+        return jsonError("This product is not part of this order.", 403);
+      }
+
+      const product = await env.DB.prepare(
+        "SELECT file_key, file_name FROM products WHERE id = ?",
+      )
+        .bind(productId)
+        .first();
+
+      if (!product?.file_key || !product?.file_name) {
+        return jsonError("The purchased file is unavailable.", 404);
+      }
+
+      const object = await env.PRODUCT_FILES.get(product.file_key);
+
+      if (!object) {
+        return jsonError("The purchased file is unavailable.", 404);
+      }
+
+      const safeName =
+        String(product.file_name)
+          .replace(/[\\/\\r\\n\\"]/g, "_")
+          .slice(0, 180) || "download.pdf";
+
+      return new Response(object.body, {
+        headers: {
+          "Content-Type": "application/pdf",
+          "Content-Disposition": `attachment; filename="${safeName}"`,
+          "Cache-Control": "private, no-store",
+          "X-Content-Type-Options": "nosniff",
+        },
+      });
     }
 
     // Public storefront products: only published products.

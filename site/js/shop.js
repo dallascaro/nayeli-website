@@ -296,7 +296,7 @@ checkoutForm.addEventListener("submit", async (event) => {
   }
 
   const confirmed = window.confirm(
-    "One last check: please confirm your email address is correct and your cart contains the resources you want. Continue with this development-only purchase simulation? No payment will be taken.",
+    "One last check: confirm your email address and cart. Continue to secure Stripe checkout to complete your payment?",
   );
 
   if (!confirmed) {
@@ -340,8 +340,85 @@ checkoutForm.addEventListener("submit", async (event) => {
   }
 });
 
+async function handleCheckoutReturn() {
+  const params = new URLSearchParams(window.location.search);
+  const checkout = params.get("checkout");
+
+  if (checkout === "cancelled") {
+    checkoutFormStatus.textContent =
+      "Checkout was canceled. Your cart is still saved.";
+    params.delete("checkout");
+    const url = new URL(window.location.href);
+    url.searchParams.delete("checkout");
+    url.searchParams.delete("session_id");
+    window.history.replaceState({}, "", url);
+    return;
+  }
+
+  if (checkout !== "success") return;
+
+  const sessionId = params.get("session_id");
+
+  if (!sessionId) {
+    checkoutFormStatus.textContent =
+      "We couldn't verify the checkout session. Your cart is still saved.";
+    return;
+  }
+
+  checkoutButton.disabled = true;
+  checkoutFormStatus.textContent = "Verifying your payment...";
+
+  try {
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const response = await fetch(
+        `/api/checkout/verify-session?session_id=${encodeURIComponent(sessionId)}`,
+        { cache: "no-store" },
+      );
+
+      if (response.status === 202) {
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        continue;
+      }
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || "Payment verification failed.");
+      }
+
+      if (result.verified === true && result.paymentStatus === "paid") {
+        cart.clear();
+        saveCart();
+        renderCart();
+
+        checkoutFormStatus.textContent =
+          "Payment confirmed! Your cart has been cleared.";
+
+        const url = new URL(window.location.href);
+        url.searchParams.delete("checkout");
+        url.searchParams.delete("session_id");
+        window.history.replaceState({}, "", url);
+
+        validateCheckout();
+        return;
+      }
+
+      throw new Error("Payment has not been confirmed yet.");
+    }
+
+    checkoutFormStatus.textContent =
+      "Payment verification is taking longer than expected. Your cart is still saved. Please refresh this page to check again.";
+  } catch (error) {
+    checkoutFormStatus.textContent =
+      `${error.message || "We couldn't verify your payment."} Your cart is still saved.`;
+  } finally {
+    validateCheckout();
+  }
+}
+
 loadProducts().then(() => {
   renderCart();
   validateCheckout();
+  handleCheckoutReturn();
 });
 renderCart();
