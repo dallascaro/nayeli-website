@@ -6,6 +6,8 @@ const cartCount = document.querySelector("#cart-count");
 const cartSubtotal = document.querySelector("#cart-subtotal");
 const cartStatus = document.querySelector("#cart-status");
 const clearCartButton = document.querySelector("#clear-cart");
+const cartSection = document.querySelector("#cart");
+const cartShortcut = document.querySelector("#cart-shortcut");
 
 let PRODUCTS = [];
 
@@ -77,10 +79,15 @@ const formatPrice = (price) =>
 
 function renderProducts() {
   if (PRODUCTS.length === 0) {
+    cartSection.hidden = true;
+    cartShortcut.hidden = true;
     productGrid.innerHTML =
-      '<p role="status">No products available yet. Please check back soon.</p>';
+      '<p role="status">✨ Our first resources are on the way! We’re creating practical tools to support school psychologists and educators. Please check back soon.</p>';
     return;
   }
+
+  cartSection.hidden = false;
+  cartShortcut.hidden = false;
 
   productGrid.innerHTML = PRODUCTS.map(
     (product) => `
@@ -409,8 +416,7 @@ async function handleCheckoutReturn() {
     checkoutFormStatus.textContent =
       "Payment verification is taking longer than expected. Your cart is still saved. Please refresh this page to check again.";
   } catch (error) {
-    checkoutFormStatus.textContent =
-      `${error.message || "We couldn't verify your payment."} Your cart is still saved.`;
+    checkoutFormStatus.textContent = `${error.message || "We couldn't verify your payment."} Your cart is still saved.`;
   } finally {
     validateCheckout();
   }
